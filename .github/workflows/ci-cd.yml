@@ -1,0 +1,73 @@
+name: CI/CD Pipeline with SAST
+# Запускаем пайплайн при каждом пуше в ветки main или master
+# и при каждом пул-реквесте в них.
+on:
+ push:
+ branches: [ main, master ]
+ pull_request:
+ branches: [ main, master ]
+jobs:
+ security-scan:
+ name: Security Scan
+ runs-on: ubuntu-latest # Запускаем на последнем Ubuntu-раннере от GitHub
+ steps:
+ # Шаг 1: Получаем код из репозитория
+ - name: Checkout code
+ uses: actions/checkout@v4
+ # Шаг 2: Настраиваем окружение Python
+ - name: Set up Python
+ uses: actions/setup-python@v5
+ with:
+ python-version: '3.10' # Указываем версию Python
+ # Шаг 3: Устанавливаем зависимости (включая те, что нужны для тестов)
+ - name: Install dependencies
+ run: |
+ python -m pip install --upgrade pip
+ pip install -r requirements.txt
+ pip install pytest # Устанавливаем pytest для запуска тестов
+ # Шаг 4: Запускаем SAST-сканер (Bandit) для анализа исходного кода
+ - name: Run Bandit SAST Scan
+ run: |
+ pip install bandit
+ bandit -r . --severity-level high --confidence-level high -f json -o
+bandit_results.json || true
+ # Опции:
+ # -r . - рекурсивно сканировать текущую директорию
+ # --severity-level high - показывать только уязвимости уровня HIGH
+ # --confidence-level high - показывать только уязвимости с высоким
+уровнем достоверности
+ # -f json -o ... - вывести результат в файл в формате JSON
+ # || true - это костыль, чтобы шаг не "падал" при найденных уязвимостях.
+ # Мы обработаем результат на следующем шаге.
+ # Шаг 4.1: Анализируем отчет Bandit и "валим" пайплайн при критических
+уязвимостях
+ - name: Check Bandit Results
+ id: bandit-check
+ run: |
+ if [ -f bandit_results.json ]; then
+ # Ищем в отчете результаты с высоким уровнем серьезности (HIGH)
+ if jq -e '.results[] | select(.issue_confidence == "HIGH" and .issue_severity
+== "HIGH")' bandit_results.json; then
+ echo "Bandit found critical vulnerabilities! Failing the pipeline."
+ exit 1 # Завершаем шаг с ошибкой, что заставит пайплайн "упасть"
+ else
+ echo "No critical vulnerabilities found by Bandit."
+ fi
+ else
+ echo "Bandit report not found. Assuming no issues."
+ fi
+ # Шаг 5: Запускаем сканер зависимостей Trivy
+ - name: Run Trivy vulnerability scanner
+ uses: aquasecurity/trivy-action@master
+ with:
+ scan-type: 'fs'
+ scan-ref: '.'
+ format: 'table'
+ exit-code: '1' # Пайплайн упадет, если Trivy найдет уязвимости
+ ignore-unfixed: true # Игнорировать уязвимости, для которых нет фикса
+ severity: 'HIGH,CRITICAL' # Проверять только на критические
+уязвимости
+ # Шаг 6: Запускаем наши unit-тесты
+ - name: Run Tests with pytest
+ run: |
+ python -m pytest tests/ -v
