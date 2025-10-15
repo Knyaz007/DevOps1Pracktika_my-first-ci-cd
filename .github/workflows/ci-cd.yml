@@ -35,7 +35,7 @@ jobs:
         id: bandit-check
         run: |
           if [ -f bandit_results.json ]; then
-            if jq -e '.results[] | select(.issue_confidence == "HIGH" and .issue_severity == "HIGH")' bandit_results.json > /dev/null; then
+            if jq -e '.results[] | select(.issue_confidence == "HIGH" and .issue_severity == "HIGH" and .issue_severity == "HIGH")' bandit_results.json > /dev/null; then
               echo "Bandit found critical vulnerabilities! Failing the pipeline."
               exit 1
             else
